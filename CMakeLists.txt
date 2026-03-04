@@ -71,11 +71,12 @@ else()
 endif()
 
 # Configs
-set(TILELANG_BACKENDS CUDA ROCM METAL)
+set(TILELANG_BACKENDS CUDA ROCM METAL RISCV_AME)
 
 set(TILELANG_BACKEND_DOC_CUDA "Enable CUDA backend (ON/OFF/or CUDA SDK path)")
 set(TILELANG_BACKEND_DOC_ROCM "Enable ROCm backend (ON/OFF/or ROCm SDK path)")
 set(TILELANG_BACKEND_DOC_METAL "Enable Metal backend")
+set(TILELANG_BACKEND_DOC_RISCV_AME "Enable RISCV AME backend for XSAI CPU")
 
 # TVM's config.cmake redefines USE_* options later, so we cache the user's choice
 # (including explicit -DUSE_XXX arguments) before we include TVM and restore it
@@ -204,6 +205,34 @@ if(NOT TILELANG_BACKEND_USER_SELECTED)
       set(USE_CUDA ON)
     endif()
   endif()
+endif()
+
+if(USE_RISCV_AME)
+  message(STATUS "Enable RISCV AME backend support")
+  
+  # Check for LLVM-AME path
+  if(DEFINED ENV{LLVM_AME_PATH})
+    set(LLVM_AME_PATH $ENV{LLVM_AME_PATH})
+    message(STATUS "Using LLVM-AME from: ${LLVM_AME_PATH}")
+  elseif(DEFINED ENV{XS_PROJECT_ROOT})
+    set(LLVM_AME_PATH "$ENV{XS_PROJECT_ROOT}/local/llvm")
+    if(EXISTS ${LLVM_AME_PATH})
+      message(STATUS "Using LLVM-AME from: ${LLVM_AME_PATH}")
+    else()
+      message(WARNING "LLVM-AME not found at ${LLVM_AME_PATH}. RISCV AME backend will compile but may not work.")
+    endif()
+  else()
+    message(WARNING "LLVM_AME_PATH or XS_PROJECT_ROOT not set. RISCV AME backend will compile but may not work without LLVM-AME.")
+  endif()
+  
+  file(GLOB TILE_LANG_RISCV_AME_SRCS
+    src/target/codegen_riscv_ame.cc
+    src/target/rt_mod_riscv_ame.cc
+  )
+  list(APPEND TILE_LANG_SRCS ${TILE_LANG_RISCV_AME_SRCS})
+  
+  # Add compile definition
+  add_compile_definitions(TILELANG_ENABLE_RISCV_AME)
 endif()
 
 if(USE_METAL)
@@ -380,8 +409,11 @@ set_target_properties(tilelang PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 # Build cython extension
-find_package(Python REQUIRED COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
+find_package(Python COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
 
+if(Python_FOUND)
+  message(STATUS "Found Python for Cython extension: ${Python_VERSION}")
+  
 add_custom_command(
   OUTPUT "${CMAKE_BINARY_DIR}/tilelang_cython_wrapper.cpp"
   COMMENT
@@ -412,7 +444,11 @@ install(TARGETS tilelang_cython_wrapper
         RUNTIME DESTINATION tilelang/lib
         ARCHIVE DESTINATION tilelang/lib)
 
-# Copy libz3.so to build folder to workaround isolated build env issue
+else()
+  message(WARNING "Python Development.Module not found, skipping Cython extension build")
+endif()
+
+# add python z3 lib path to rpath for running tests and dev in current folder
 if(USE_Z3 AND USE_PYPI_Z3)
   get_target_property(Z3_LIBRARY_PATH z3::libz3 IMPORTED_LOCATION)
   install(FILES "${Z3_LIBRARY_PATH}" DESTINATION "${CMAKE_BINARY_DIR}/lib")
