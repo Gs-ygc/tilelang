@@ -11,6 +11,7 @@ from .gemm_mma_sm70 import GemmMMASm70
 from .gemm_wgmma import GemmWGMMA
 from .gemm_tcgen05 import GemmTCGEN5
 from .gemm_mfma import GemmMFMA
+from .gemm_ame import GemmAME  # RISCV AME implementation
 from tilelang import _ffi_api
 from tilelang.utils.target import target_is_volta
 
@@ -176,7 +177,11 @@ class GemmPy(Node, Scriptable):
             NotImplementedError: If the instruction type is not supported
             ValueError: If the instruction type is unknown
         """
-        if gemm_inst.is_mma():
+        # For CPU targets (riscv_ame), use dedicated AME implementation
+        # that generates tile-based intrinsic calls
+        if target.kind.name == "riscv_ame":
+            return GemmAME
+        elif gemm_inst.is_mma():
             if target_is_volta(target):
                 return GemmMMASm70
             return GemmMMA
@@ -190,3 +195,4 @@ class GemmPy(Node, Scriptable):
             raise NotImplementedError("TCGEN5MMA is not implemented")
         else:
             raise ValueError(f"Unsupported GEMM instruction: {gemm_inst}")
+

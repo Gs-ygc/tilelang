@@ -117,6 +117,29 @@ class LibraryGenerator:
                 "-I" + COMPOSABLE_KERNEL_INCLUDE_DIR,
             ]
         elif is_cpu_target(target):
+            # Special handling for RISCV AME target - use registered callback
+            if target.kind.name == "riscv_ame":
+                print(f"🔧 检测到 RISCV AME 目标，使用专用编译回调")
+                try:
+                    # Get the registered compilation callback
+                    compile_func = tvm.get_global_func("tilelang_callback_riscv_ame_compile", allow_missing=False)
+                    
+                    # Call the callback with code, target, and pass_config
+                    obj_data = compile_func(self.lib_code, str(target), self.pass_configs or {})
+                    
+                    # Write object file to temp location (delete=False to keep the file)
+                    with tempfile.NamedTemporaryFile(mode="wb", suffix=".so", delete=False) as f:
+                        f.write(bytes(obj_data))
+                        libpath = f.name
+                    
+                    self.srcpath = None  # Callback doesn't expose source path
+                    self.libpath = libpath
+                    print(f"✅ RISCV AME 编译成功: {libpath}")
+                    return
+                except Exception as e:
+                    raise RuntimeError(f"RISCV AME compilation failed: {e}") from e
+            
+            # Standard CPU target compilation
             from tilelang.contrib.cc import get_cplus_compiler
 
             src = tempfile.NamedTemporaryFile(mode="w", suffix=".cpp", delete=False)  # noqa: SIM115

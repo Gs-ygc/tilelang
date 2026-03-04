@@ -135,6 +135,10 @@ GemmInst GemmNode::getGemmInst(int block_size, Target target) const {
     return GemmInst::kMFMA;
   } else if (TargetIsCuda(target)) {
     return GemmInst::kMMA;
+  } else if (target->kind->name == "riscv_ame") {
+    // RISCV AME uses its own matrix extension instructions
+    // For now, use MMA as fallback for layout inference
+    return GemmInst::kMMA;
   } else {
     ICHECK(0) << "Unsupported target for gemm: " << target;
     return GemmInst::kMMA;
@@ -148,6 +152,51 @@ std::pair<int, int> GemmWarpPolicyNode::computeWarpPartition(
     return {1, num_warps}; // TCGEN5MMA doesn't care about warp partitioning
   }
 
+  // CPU targets: treat threads as independent cores, not warps
+  // For RISCV AME and other CPU targets, use simple partitioning
+  bool is_cpu = false;
+  if (target.defined()) {
+    // Check target string for CPU-like targets
+    std::string target_str = target->str();
+    is_cpu = (target_str.find("riscv_ame") != std::string::npos ||
+              target_str.find("llvm") != std::string::npos ||
+              target_str.find(" c ") != std::string::npos ||
+              target_str.find("-keys=cpu") != std::string::npos);
+  }
+  
+  if (is_cpu) {
+    // For CPU: each thread processes the entire matrix tile independently
+    // No warp-style parallelism - return 1x1 partition
+    // This allows single-thread processing of large tiles (128x64x128+)
+    if (num_warps == 0) {
+      return {1, 1};
+    }
+    
+    // Multi-threaded CPU: use flexible partitioning
+    int m_warp = 1, n_warp = 1;
+    
+    if (this->isSquare()) {
+      // Try to balance M and N partitioning
+      int sqrt_warps = std::sqrt(num_warps);
+      for (int m = sqrt_warps; m >= 1; m--) {
+        if (num_warps % m == 0) {
+          m_warp = m;
+          n_warp = num_warps / m;
+          break;
+        }
+      }
+    } else if (this->isFullRow()) {
+      m_warp = num_warps;
+      n_warp = 1;
+    } else if (this->isFullCol()) {
+      m_warp = 1;
+      n_warp = num_warps;
+    }
+    
+    return {m_warp, n_warp};
+  }
+
+  // GPU path: enforce tile size constraints
   int m_warp = 1, n_warp = 1;
   constexpr int kMPerWarp = 16; // Rows processed by a single warp
   int kNPerWarp = 8;            // Columns processed by a single warp

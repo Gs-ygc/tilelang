@@ -12,5 +12,6 @@ from .swizzle import (
     make_half_bank_swizzled_layout,  # noqa: F401
     make_quarter_bank_swizzled_layout,  # noqa: F401
     make_linear_layout,  # noqa: F401
+    make_ame_swizzled_layout,  # noqa: F401
 )
 from .gemm_sp import make_cutlass_metadata_layout  # noqa: F401

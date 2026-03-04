@@ -137,6 +137,10 @@ GemmInst GemmPyNode::getGemmInst(int block_size, Target target) const {
              TargetIsTuring(target) || TargetIsHopper(target) ||
              TargetIsSm100(target) || TargetIsSM120(target)) {
     return GemmInst::kMMA;
+  } else if (target->kind->name == "riscv_ame") {
+    // RISCV AME uses its own matrix extension instructions
+    // For now, use MMA as fallback for layout inference
+    return GemmInst::kMMA;
   } else {
     ICHECK(0) << "Unsupported target for gemm: " << target->str();
     return GemmInst::kMMA; // This line will never be reached due to ICHECK, but
@@ -246,6 +250,8 @@ Stmt GemmPyNode::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   auto block_size = *as_const_int(T.thread_bounds->extent);
   GemmInst gemm_inst = getGemmInst(block_size, T.target);
 
+  // For CPU targets, treat threads as cores/OpenMP threads
+  // block_size represents number of threads to use
   auto [warp_m, warp_n] =
       policy_->computeWarpPartition(m_, n_, block_size, T.target, gemm_inst);
 

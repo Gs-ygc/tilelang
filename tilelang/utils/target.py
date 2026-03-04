@@ -16,6 +16,7 @@ SUPPORTED_TARGETS: dict[str, str] = {
     "webgpu": "WebGPU target for browser/WebGPU runtimes.",
     "c": "C source backend.",
     "cutedsl": "CuTe DSL GPU target.",
+    "riscv_ame": "RISCV with AME (Matrix Extension) target for XSAI CPU.",
 }
 
 
@@ -58,6 +59,23 @@ def check_metal_availability() -> bool:
         return False
     # todo: check torch version?
     return arch == "arm64"
+
+
+def check_riscv_ame_availability() -> bool:
+    """
+    Check if RISCV AME toolchain is available on the system.
+    Returns:
+        bool: True if RISCV AME toolchain is available, False otherwise.
+    """
+    import os
+    try:
+        # Check for LLVM-AME compiler in environment or default path
+        llvm_ame_path = os.environ.get('LLVM_AME_PATH', 
+                                       os.path.join(os.environ.get('XS_PROJECT_ROOT', ''), 'local/llvm'))
+        clang = os.path.join(llvm_ame_path, 'bin/clang')
+        return os.path.exists(clang) and os.access(clang, os.X_OK)
+    except Exception:
+        return False
 
 
 def determine_target(target: str | Target | Literal["auto"] = "auto", return_object: bool = False) -> str | Target:
