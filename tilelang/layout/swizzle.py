@@ -170,16 +170,8 @@ def make_linear_layout(buffer_or_load_or_region: BufferLikeType):
     Returns:
         Layout: A row-major linear layout
     """
-    if len(args) == 1:
-        stride, continuous = _get_stride_continuous(args[0])
-    elif len(args) == 2:
-        stride, continuous = args
-    else:
-        raise ValueError(f"Invalid arguments: {args}")
-    return _ffi_api.make_linear_layout(
-        stride,
-        continuous,
-    )
+    _, shape, _ = _get_buffer_info(buffer_or_load_or_region)
+    return _ffi_api.make_linear_layout(list(shape))
 
 
 def make_gemm_fragment_8x8():

@@ -170,7 +170,10 @@ public:
     bool disable_vectorize_256 = tl_config::Vectorize256Disabled();
     bool verbose = tl_config::VectorizePlannerVerboseEnabled();
 
-    if (TargetSupportVectorize256(Target::Current(false)) &&
+    // Allow undefined target to handle cases where context isn't set yet
+    auto current_target = Target::Current(true);
+    if (current_target.defined() &&
+        TargetSupportVectorize256(current_target) &&
         !disable_vectorize_256 &&
         VectorizeFindMemoryAccess::MaySupportVectorize256(node)) {
       vector_load_bits_max_ = initial_vector_size_ = loop_extent_vector_size_ =

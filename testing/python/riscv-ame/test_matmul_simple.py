@@ -45,7 +45,7 @@ if __name__ == "__main__":
     # AME prefers large tiles: single thread handles > 128x64x128
     # Using 128x128x128 for this test
     M, N, K = 128, 128, 128
-    func = simple_matmul.func(M, N, K)
+    func = simple_matmul.get_tir(M, N, K)
     
     # Lower to get artifact
     target = "riscv_ame"
