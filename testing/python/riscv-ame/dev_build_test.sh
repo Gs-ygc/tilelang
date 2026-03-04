@@ -40,7 +40,7 @@ fi
 
 # 2. Clean previous build (optional)
 echo -e "\n${YELLOW}[2/6] Cleaning previous build...${NC}"
-cd $XS_PROJECT_ROOT/tilelang
+cd $XS_PROJECT_ROOT/DSL/tilelang
 if [ -d "build" ]; then
     echo "Removing old build directory..."
     rm -rf build
