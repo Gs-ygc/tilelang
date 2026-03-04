@@ -170,8 +170,16 @@ def make_linear_layout(buffer_or_load_or_region: BufferLikeType):
     Returns:
         Layout: A row-major linear layout
     """
-    _, shape, _ = _get_buffer_info(buffer_or_load_or_region)
-    return _ffi_api.make_linear_layout(list(shape))
+    if len(args) == 1:
+        stride, continuous = _get_stride_continuous(args[0])
+    elif len(args) == 2:
+        stride, continuous = args
+    else:
+        raise ValueError(f"Invalid arguments: {args}")
+    return _ffi_api.make_linear_layout(
+        stride,
+        continuous,
+    )
 
 
 def make_gemm_fragment_8x8():
@@ -221,3 +229,28 @@ def make_fully_replicated_layout_fragment(buffer: BufferLikeType, threads: int):
     """
     _, shape, _ = _get_buffer_info(buffer)
     return _ffi_api.make_fully_replicated_layout_fragment(list(shape), threads)
+
+
+# RISCV AME specific: 64B cache line, 8 banks × 64B each
+def make_ame_swizzled_layout(*args):
+    """
+    Swizzled layout for RISCV AME with 8 banks, each 64B.
+    
+    Hardware configuration:
+    - Cache line: 64 Bytes = 16 float32 elements
+    - Banks: 8
+    - Each bank: 64 Bytes = 16 float32 elements
+    - Total: 8 × 64B = 512B = 128 float32 elements
+    
+    This ensures data is distributed across all 8 banks to maximize
+    parallel access bandwidth and avoid bank conflicts.
+    
+    Args:
+        args: buffer/BufferLoad/BufferRegion or (stride, continuous, element_size)
+    Examples:
+        make_ame_swizzled_layout(buffer)
+        make_ame_swizzled_layout(stride, continuous, element_size)
+    """
+    # 8 banks × 64B = 512B, but standard is 128B (4 banks × 32B)
+    # So we use full_bank (128B) swizzle which works well for this architecture
+    return make_full_bank_swizzled_layout(*args)

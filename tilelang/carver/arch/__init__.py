@@ -21,6 +21,8 @@ def get_arch(target: str | Target = "cuda") -> TileDevice:
         return CDNA(target)
     elif target.kind.name == "metal":
         return METAL(target)
+    elif target.kind.name == "riscv_ame":
+        return CPU(target)  # RISCV AME uses CPU architecture base
     else:
         raise ValueError(f"Unsupported target: {target.kind.name}")
 

@@ -167,10 +167,15 @@ public:
       : arith::IRMutatorWithAnalyzer(analyzer), layout_map_(layout_map) {}
 
   int Plan(const For &node) {
-    bool disable_vectorize_256 = tl_config::Vectorize256Disabled();
-    bool verbose = tl_config::VectorizePlannerVerboseEnabled();
-
-    if (TargetSupportVectorize256(Target::Current(false)) &&
+    tvm::transform::PassContext ctxt = tvm::transform::PassContext::Current();
+    Optional<Bool> opt_disable_vectorize_256 =
+        ctxt->GetConfig(kDisableVectorize256, Optional<Bool>());
+    bool disable_vectorize_256 =
+        opt_disable_vectorize_256.value_or(Bool(false));
+    // Allow undefined target to handle cases where context isn't set yet
+    auto current_target = Target::Current(true);
+    if (current_target.defined() &&
+        tvm::tl::TargetIsSm100(current_target) &&
         !disable_vectorize_256 &&
         VectorizeFindMemoryAccess::MaySupportVectorize256(node)) {
       vector_load_bits_max_ = initial_vector_size_ = loop_extent_vector_size_ =

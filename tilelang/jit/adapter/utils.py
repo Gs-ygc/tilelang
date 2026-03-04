@@ -104,7 +104,7 @@ def is_hip_target(target: Target) -> bool:
 
 
 def is_cpu_target(target: Target) -> bool:
-    return target.kind.name in ["c"]
+    return target.kind.name in ["c", "riscv_ame"]
 
 
 def is_metal_target(target: Target) -> bool:

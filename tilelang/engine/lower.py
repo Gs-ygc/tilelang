@@ -23,7 +23,7 @@ from tilelang.engine.phase import (
 
 
 def is_cpu_device_backend(target: Target):
-    return target.kind.name == "c"
+    return target.kind.name in ["c", "riscv_ame"]
 
 
 def has_device_kernel_launch(attrs) -> bool:
@@ -36,9 +36,11 @@ def is_device_call_c_device(func: tir.PrimFunc):
     calling_conv = attrs.get("calling_conv", CallingConv.DEFAULT)
     is_cpacked = calling_conv == CallingConv.C_PACKED_FUNC
 
-    # Check if it's a C target
-    if "target" in attrs and attrs["target"].kind.name == "c" and not is_cpacked:
-        return True
+    # Check if it's a C or RISCV AME target
+    if "target" in attrs:
+        target_kind = attrs["target"].kind.name
+        if target_kind in ["c", "riscv_ame"] and not is_cpacked:
+            return True
 
     return has_device_kernel_launch(attrs)
 
@@ -127,6 +129,94 @@ def tilelang_callback_hip_compile(code, target):
     return hsaco
 
 
+@tvm_ffi.register_global_func("tilelang_callback_riscv_ame_compile", override=True)
+def tilelang_callback_riscv_ame_compile(code, target, pass_config=None):
+    """Compile C code with AME intrinsics using LLVM-AME compiler."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 添加调试信息 - 看看是否真的调用了这个函数
+    logger.warning("=" * 60)
+    logger.warning("🔧 tilelang_callback_riscv_ame_compile 被调用!")
+    logger.warning("=" * 60)
+    print("\n" + "=" * 60)
+    print("🔧 RISCV AME 编译回调被调用!")
+    print("=" * 60)
+    
+    from tilelang.contrib import llvm_ame
+    
+    # Get LLVM-AME compiler path
+    llvm_ame_path = os.environ.get('LLVM_AME_PATH')
+    if not llvm_ame_path:
+        xs_root = os.environ.get('XS_PROJECT_ROOT')
+        if xs_root:
+            llvm_ame_path = osp.join(xs_root, 'local/llvm')
+    
+    print(f"LLVM_AME_PATH: {llvm_ame_path}")
+    
+    # Read pass-config keys
+    cfg = pass_config or {}
+    
+    # Build compiler options
+    options = [
+        "-std=c++17",
+        "-O3",
+        "-fPIC",
+        "-march=rv64gcv_zvfh_zvfhmin",  # 添加明确的 march 以支持 vector
+        "-menable-experimental-extensions",  # 启用实验性扩展
+        "-Wno-error",  # 暂时忽略警告作为错误
+    ]
+    
+    print(f"编译选项: {options}")
+    
+    # Merge extra compiler flags from pass config
+    extra_flags = cfg.get(PassConfigKey.TL_DEVICE_COMPILE_FLAGS, None)
+    if extra_flags:
+        import shlex
+        if isinstance(extra_flags, str):
+            tokens = shlex.split(extra_flags)
+        else:
+            tokens = []
+            for flag in extra_flags:
+                if isinstance(flag, str):
+                    tokens.extend(shlex.split(flag))
+                else:
+                    tokens.append(str(flag))
+        options += tokens
+        print(f"添加了额外的编译选项: {tokens}")
+    
+    # Get target architecture from target
+    target_arch = "rv64gcv_ame"  # Default RISCV64 with vector and AME
+    if hasattr(target, 'attrs') and 'march' in target.attrs:
+        target_arch = target.attrs['march']
+    
+    print(f"目标架构: {target_arch}")
+    print(f"代码长度: {len(code)} bytes")
+    print("=" * 60 + "\n")
+    
+    # Compile with LLVM-AME
+    try:
+        obj = llvm_ame.compile_riscv_ame(
+            code,
+            target_arch=target_arch,
+            output_format="both",
+            options=options,
+            llvm_path=llvm_ame_path,
+            verbose=True,  # 强制启用 verbose 输出
+        )
+        print(f"✅ 编译成功! 目标文件大小: {len(obj)} bytes\n")
+        return obj
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"❌ RISCV AME compilation failed: {e}")
+        logger.error(f"Generated code:\n{code}")
+        print(f"\n❌ 编译失败: {e}\n")
+        print("生成的代码:")
+        print(code)
+        raise
+
+
 def extrac_params(func: tir.PrimFunc) -> list[KernelParam]:
     tensor_types = []
     for var in func.params:
@@ -139,6 +229,12 @@ def extrac_params(func: tir.PrimFunc) -> list[KernelParam]:
 
 def canon_target_host(target: str | Target, target_host: str | Target | None):
     if not target_host:
+        # For CPU targets (c, riscv_ame), use the same target as host
+        if isinstance(target, Target) and target.kind.name in ["c", "riscv_ame"]:
+            return target
+        elif isinstance(target, str) and target in ["c", "riscv_ame"]:
+            return target
+        # For GPU targets, use llvm or c as host
         target_host = "llvm" if tvm.runtime.enabled("llvm") else "c"
 
     return target_host
@@ -172,6 +268,9 @@ def host_codegen(host_mod: tvm.IRModule, target_host: Target, target: Target | N
         host_mod = tvm.ffi.get_global_func("target.build.llvm")(host_mod, target_host)
     elif target_host.kind.name == "c":
         host_mod = tvm.ffi.get_global_func("target.build.tilelang_c")(host_mod, target_host)
+    elif target_host.kind.name == "riscv_ame":
+        # RISCV AME uses same build as C for host code
+        host_mod = tvm.ffi.get_global_func("target.build.tilelang_c")(host_mod, target_host)
     else:
         raise ValueError(f"Target host {target_host.kind.name} is not supported")
     return host_mod
@@ -190,6 +289,8 @@ def device_codegen(device_mod: tvm.IRModule, target: Target) -> tvm.IRModule:
         device_mod = tvm.ffi.get_global_func("target.build.tilelang_hip")(device_mod, target)
     elif target.kind.name == "metal":
         device_mod = tvm.ffi.get_global_func("target.build.metal")(device_mod, target)
+    elif target.kind.name == "riscv_ame" or (hasattr(target, 'keys') and "riscv_ame" in target.keys):
+        device_mod = tvm.ffi.get_global_func("target.build.tilelang_riscv_ame")(device_mod, target)
     else:
         raise ValueError(f"Target {target.kind.name} is not supported")
 
@@ -215,6 +316,8 @@ def device_codegen_without_compile(device_mod: tvm.IRModule, target: Target) -> 
         device_mod = tvm.ffi.get_global_func("target.build.webgpu")(device_mod, target)
     elif target.kind.name == "metal":
         device_mod = tvm.ffi.get_global_func("target.build.metal")(device_mod, target)
+    elif target.kind.name == "riscv_ame" or (hasattr(target, 'keys') and "riscv_ame" in target.keys):
+        device_mod = tvm.ffi.get_global_func("target.build.tilelang_riscv_ame_without_compile")(device_mod, target)
     else:
         raise ValueError(f"Target {target.kind.name} is not supported")
 
